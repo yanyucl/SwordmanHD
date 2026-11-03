@@ -755,6 +755,18 @@ func story_cursor_to(x: int, y: int, slide: bool) -> void:
 		await SceneGuard.wait(self, 1 / 25.0)
 
 
+## AI 单位轮到时的光标 (差异): AI 阶段状态 3 用与剧情 slide 同一套 把光标从当前格每 tick 1 格滑到单位
+## (显示与否不变: 上一单位行动完 已显示, 所以玩家看到光标滑过来), 到位后 AI 行动对象状态 1 隐藏光标, 单位走路期间不显示
+func ai_cursor_begin(cell: Vector2i) -> void:
+	await story_cursor_to(cell.x, cell.y, true)
+	hide_cursor()
+
+
+## AI 单位开始移动: 光标格 (隐藏着) 直接改成落点, 不显示; 之后指向目标从落点滑出 / 行动完在落点重新显示
+func ai_cursor_dest(cell: Vector2i) -> void:
+	place_cursor(cell.x, cell.y)
+
+
 ## AI 出手前光标指向目标 (原版 AI 行动对象 状态 3~5, 攻击 / 法术 / 道具都走): 光标已在目标格就跳过;
 ## 否则换成效果范围形状 并显示, 从当前格滑到目标 (与剧情 slide 同一套), 停 6 tick ([字段]=5 每 tick 减到 <0),
 ## 再收回单格形状、隐藏、坐标放回行动者格 (不滑)

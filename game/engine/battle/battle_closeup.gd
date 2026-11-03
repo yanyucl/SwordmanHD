@@ -132,16 +132,17 @@ func _hit_disp(m, hit: int, left: bool, ab: bool) -> void:
 				m.position = Vector2.ZERO
 
 
-## 受击摆动 (原版 Win10 原生逐帧实测, 死魔鬼卒被殷剑平连击): 被命中的一方按 misc 帧 1 → 2 → 3 → 2 播一遍 (后退、再退、前冲、回摆; 部件 x 82 → 63 → 139 → 63,
-## 站立 107; 每帧 time=2 即 3 tick), 然后回到待机循环; 每次命中重新来一遍。原先只循环帧 1~2 (没有第 3 帧的前冲, 也不回摆)。
+## 受击摆动: 被命中的一方按 misc 帧 1 → 2 → 1 → 2 播一遍 (每帧 time=2 即 3 tick), 然后回到待机循环; 每次命中重新来一遍。
+## 受击姿势只在 misc 帧 1 / 2 之间来回切换 (原版每次命中约 0.43 秒后回待机); misc 帧 3~5 是被打飞翻滚的姿势、位置挪到画面中间
+## (殷剑平 x 203 → 143), 旧版按 1 → 2 → 3 → 2 播, 单命中的尸虫一打就整个人翻到左上再跳回来 (玩家 2026-11-03 指出「比原版凌乱」)。依据。
 func _hit_sway(dmisc, dir: String) -> void:   # dmisc 是 AnimPlayer (引擎层不新增对组装层类名的引用, 见 test_engine_deps)
 	_hit_id += 1
 	var id := _hit_id
-	dmisc.play(dir, 1, 4, false)
+	dmisc.play(dir, 1, 3, false)
 	await dmisc.finished
 	if id != _hit_id:
 		return
-	dmisc.play(dir, 2, 3, false)
+	dmisc.play(dir, 1, 3, false)
 	await dmisc.finished
 	if id != _hit_id or dmisc.data.is_empty():   # 个别单位没有近景 misc 动画: 没有待机可回
 		return
@@ -286,8 +287,11 @@ func strike(a: BattleUnit, d: BattleUnit, results: Array, skill_anim := "", skil
 	var atk_dir := ThemeAssets.f("unit_attack", [sp, sp, "ab" if kind in ["miss", "guard"] else "a"])
 	if skill_anim != "" and anim_exists(skill_anim):
 		atk_dir = skill_anim
+	asd["misc"].visible = true   # 上一击是对方的远程攻击时本方被藏着 (见 _play_attack 末尾), 轮到本方出手 (如反击) 先现身
 	if ranged:
 		dsd["misc"].visible = false   # 调用方没在 open 时藏 (hide_target) 也兜住: 闪光期间守方不露脸
+	else:
+		dsd["misc"].visible = true
 	if skill_name != "":
 		bs.ctl.view.cast_banner(skill_name, _ui)
 	if kind in ["critical", "double"] or skill_anim != "":
@@ -389,7 +393,7 @@ func _play_attack(a: BattleUnit, d: BattleUnit, asd: Dictionary, dsd: Dictionary
 				elif not r.get("flash", {}).is_empty():
 					_flash_red(r["flash"])
 			else:
-				_hit_sway(dmisc, dsd["dir"])   # 受击摆动: 帧 1 -> 2 -> 3 -> 2 再回待机 (原版逐帧实测); 原先只循环帧 1~2
+				_hit_sway(dmisc, dsd["dir"])   # 受击摆动: 帧 1 -> 2 -> 1 -> 2 再回待机 (原版逐帧实测, 见 _hit_sway)
 				if r["kind"] == "critical":
 					_flash()
 			if dmg > 0:  # 每个命中帧扣 伤害/命中帧数, 并白闪体力条
@@ -399,7 +403,9 @@ func _play_attack(a: BattleUnit, d: BattleUnit, asd: Dictionary, dsd: Dictionary
 	await atk.finished
 	_hit_id += 1   # 还没摆完的受击动画作废 (下面直接回待机 / 倒下)
 	atk.queue_free()
-	amisc.visible = true
+	# 远程攻击 (攻击动画第二段已切到守方一侧, 攻方不再画): 放完后攻方继续不露面, 伤害数字 / 倒下都在守方这边演 (玩家 2026-11-03 指出远程怪在扣血时又冒出来);
+	# 之后若有反击, strike 开头会让出手方现身
+	amisc.visible = not ranged
 	dmisc.visible = true
 	var ia := idle_frame(amisc.data) if not amisc.data.is_empty() else Vector2i(0, 1)
 	amisc.play(asd["dir"], ia.x, ia.y)
@@ -423,6 +429,7 @@ func _play_attack(a: BattleUnit, d: BattleUnit, asd: Dictionary, dsd: Dictionary
 ##   武器附加特效号 (吸血 = 1) 载入的红色收拢光环 (8 帧 x 2 tick = 0.64 秒, 首帧淡入); 光环放完 digit_delay 秒后弹蓝色吸血量数字,
 ##   攻方体力条与数字同时按每周期 2% 上限涨上去 (InfoPanel.heal); 数字放完才往下 (敌方反击在这之后)
 func _vampire(asd: Dictionary, amount: int) -> void:
+	asd["misc"].visible = true   # 远程攻击后攻方被藏着 (_play_attack), 吸血光环在它身上放要露面
 	var cfg: Dictionary = UiLayout.el("closeup.vampire")
 	var left: bool = asd == _sides.get("left")
 	var panel: InfoPanel = asd["panel"]
@@ -453,6 +460,7 @@ func level_up_fx(u = null) -> void:
 	if float(cfg.get("delay", 0.0)) > 0.0:
 		await create_tween().tween_interval(float(cfg["delay"])).finished
 	var m = side["misc"]
+	m.visible = true   # 远程攻击后攻方被藏着 (_play_attack), 升级演出要露面
 	var md: String = side["dir"]
 	var pose := 0
 	if anim_exists(md):

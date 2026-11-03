@@ -12,6 +12,8 @@ var gc: GameContext = GameContext.current()  # 运行上下文 (引擎不直接�
 
 const Flow = preload("res://engine/rules/flow.gd")
 const UnitState = preload("res://engine/rules/unit_state.gd")
+## AI 单位走完 (不指向目标时) 到光标在落点重新显示的 tick 数: 行动对象状态 3 → 6 → 7 → 8 每个状态 1 tick (静态读码, 未逐帧实测; 差异)
+const AI_RESHOW_TICKS := 4
 
 var bs
 var rules: BattleRules
@@ -242,18 +244,23 @@ func _ai_phase(filter: Callable) -> void:
 			continue
 		any_acted = true
 		gc.state.set_data(rules.ctx.params.var_actor, u.index)  # 剧情变量 102 = 当前行动单位, AI 决定行动后写
-		bs.show_cursor(u.cx, u.cy)
-		await bs.follow_cell(u.cx, u.cy)
+		# 光标: 从当前格滑到单位 (显示与否不变) → 隐藏 → 走路期间不显示, 光标格改到落点 → 指向目标 / 行动完才在落点重新显示
+		await bs.ai_cursor_begin(Vector2i(u.cx, u.cy))
+		await bs.follow_cell(u.cx, u.cy)   # 复刻走路不卷镜头 (原版走路时 按边缘卷), 开走前保证单位在可见区; slide 已按边缘卷过时这里不动
 		var path: Array = []
 		var start := Vector2i(u.cx, u.cy)
 		var m: Vector2i = plan.move_to
 		if m != Vector2i(u.cx, u.cy):
 			path = rules.commit_move(u, m)
 			if not path.is_empty():
+				bs.ai_cursor_dest(m)
 				u.walk(path, BattleStage.UNIT_WALK_SPEED)
 				await u.move_finished
-				bs.show_cursor(u.cx, u.cy)   # 原版光标框随单位到落点 (B4 实录)
 		var act: Dictionary = plan.action
+		if act.is_empty() or String(act.kind) == "burst":
+			# 不指向目标: 行动对象状态 3 (返回 0) → 6 → 7 各占 1 tick, 状态 8 才显示光标 (每个状态一 tick, 静态读码)
+			for _i in AI_RESHOW_TICKS:   # 逐 tick 等 (与 story_cursor_to 的每 tick 一步同口径)
+				await SceneGuard.wait(self, 1 / 25.0)
 		var here := Vector2i(u.cx, u.cy)
 		if not act.is_empty() and u.alive:
 			match String(act.kind):

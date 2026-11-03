@@ -27,7 +27,7 @@ func _range(m) -> Array:
 	return [m.start_frame, m.end_frame, m.loop]
 
 
-func test_hit_sway_is_1_2_3_2_then_idle():
+func test_hit_sway_is_1_2_1_2_then_idle():
 	if not _fake_ok():
 		check(true, "无 Assets, 跳过")
 		return
@@ -36,10 +36,10 @@ func test_hit_sway_is_1_2_3_2_then_idle():
 	var cu := BattleCloseup.new(null)
 	var m := AnimPlayer.new()
 	cu._hit_sway(m, key)
-	eq(_range(m), [1, 4, false], "命中: 帧 1~3 播一遍 (不循环)")
-	m._process(0.36)   # 3 帧 x 0.12 秒
-	eq(_range(m), [2, 3, false], "再回摆: 帧 2")
-	m._process(0.12)
+	eq(_range(m), [1, 3, false], "命中: 帧 1~2 播一遍 (不循环, 不播帧 3 的翻滚姿势)")
+	m._process(0.24)   # 2 帧 x 0.12 秒
+	eq(_range(m), [1, 3, false], "再摆一遍: 帧 1~2")
+	m._process(0.24)
 	eq(_range(m), [7, 14, true], "然后回待机循环 (帧 7~13)")
 	m.free()
 	cu.free()
@@ -57,10 +57,10 @@ func test_new_hit_restarts_and_stale_sway_does_not_play_twice():
 	cu._hit_sway(m, key)
 	m._process(0.2)                 # 摆到一半又被命中
 	cu._hit_sway(m, key)
-	eq(_range(m), [1, 4, false], "第二次命中重新从帧 1 开始")
-	m._process(0.36)
-	eq(_range(m), [2, 3, false], "旧的摆动作废, 只有新的往下走 (没有被播两次)")
-	m._process(0.12)
+	eq(_range(m), [1, 3, false], "第二次命中重新从帧 1 开始")
+	m._process(0.24)
+	eq(_range(m), [1, 3, false], "旧的摆动作废, 只有新的往下走 (第二遍)")
+	m._process(0.24)
 	eq(_range(m), [7, 14, true], "之后回待机")
 	m.free()
 	cu.free()

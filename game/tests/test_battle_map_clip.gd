@@ -101,3 +101,27 @@ func test_ai_aim_cursor_shows_area_cursor_on_target() -> void:
 	await bs.aim_cursor(Vector2i(3, 3), 1, Vector2i(3, 3))
 	check(cur.plays.is_empty() and not cur.visible, "目标就是光标所在格: 不指向 ")
 	bs.free()
+
+
+## AI 单位轮到时光标从当前格滑到单位 (显示, 每 tick 1 格), 到位后隐藏; 走路期间不显示, 光标格改到落点; 行动完在落点重新显示
+func test_ai_turn_cursor_slides_then_hides_while_walking() -> void:
+	var bs := _scene(Vector2(720, 384))
+	var cur := _stub_cursor(bs)
+	bs.show_cursor(2, 2)   # 上一单位行动完 光标显示在它的落点
+	cur.plays.clear()
+	await bs.ai_cursor_begin(Vector2i(5, 3))
+	eq(cur.plays.size(), 3, "(2,2) → (5,3) 沿对角每 tick 1 格, 共 3 步")
+	check(cur.plays.all(func(p): return p[0]), "滑向单位期间光标显示")
+	check(not cur.visible, "到位后隐藏 (行动对象状态 1)")
+	eq(bs._cursor_cell, Vector2i(5, 3), "光标格在单位上")
+	cur.plays.clear()
+	bs.ai_cursor_dest(Vector2i(8, 3))
+	check(not cur.visible, "开走时仍隐藏")
+	eq(bs._cursor_cell, Vector2i(8, 3), "光标格改到落点 ")
+	bs.reshow_cursor()
+	check(cur.visible and bs.cursor_cell() == Vector2i(8, 3), "行动完在落点重新显示")
+	bs.hide_cursor()   # 剧情藏了光标: 滑动不改显示与否
+	cur.plays.clear()
+	await bs.ai_cursor_begin(Vector2i(9, 4))
+	check(not cur.plays.is_empty() and cur.plays.all(func(p): return not p[0]), "光标原本隐藏时滑动也不显示")
+	bs.free()

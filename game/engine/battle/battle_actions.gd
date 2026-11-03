@@ -31,6 +31,12 @@ func _init(scene, battle_rules: BattleRules, battle_view: BattleView, battle_ui:
 
 # ================= 普攻 (03) =================
 
+## 远程单位 (单位表 attack_type = 1, 如韩千秀、尸虫、蜈蚣类) 的普攻 / 反击按远程技能演: 守方开场就不在画面里, 到命中帧才出现 (同光轮斩, 见 BattleCloseup.strike ranged)。
+## 依据: 这 11 个单位的 NNNa.saf 都分两段 (action_counts[0] = 出手段帧数, 之后切到守方一侧、攻方不再画), 近战单位全为 0; 不藏守方时弹丸会从守方身上穿过 (用户 2026-11-03 指出尸虫)
+static func _ranged(u: BattleUnit) -> bool:
+	return int(u.info.get("attack_type", 0)) == 1
+
+
 ## 主攻, 守方能反击则反击一次 (BattleRules.exchange -> engine/rules/attack.gd), 在近景战斗画面里演出; 之后死亡处理与胜负
 func attack(a: BattleUnit, t: BattleUnit) -> void:
 	# 剧情变量 100 = 攻击者, 101 = 被攻击者 (玩家与 AI 都写); 反击不改写。第 8、22 关剧情读它
@@ -40,13 +46,13 @@ func attack(a: BattleUnit, t: BattleUnit) -> void:
 	view.face(t, a)
 	view.hide_info()
 	_pending_exp = []   # 上一场没结算完 (中途被打断) 的残留不带进这一场
-	await closeup.open(a, t)
+	await closeup.open(a, t, Vector2i(-1, -1), _ranged(a))
 	var rec := rules.exchange(a, t)
-	await closeup.strike(a, t, _kinds(rec.main), "", "", _vampire_of(rec.main_apply))
+	await closeup.strike(a, t, _kinds(rec.main), "", "", _vampire_of(rec.main_apply), true, _ranged(a))
 	_after_strike(a, t, rec.main, rec.main_apply, int(rec.exp_attacker))
 	if rec.counter != null:
 		await SceneGuard.wait(self, 0.2)
-		await closeup.strike(t, a, _kinds(rec.counter), "", "", _vampire_of(rec.counter_apply))
+		await closeup.strike(t, a, _kinds(rec.counter), "", "", _vampire_of(rec.counter_apply), true, _ranged(t))
 		_after_strike(t, a, rec.counter, rec.counter_apply, int(rec.exp_defender))
 	_settle_exp()   # 战斗即将结束: 先结算经验 (死了的拿不到), 才知道有没有升级 -> 升级演出 -> 经验框 (玩家反馈)
 	await _level_fx(a)
