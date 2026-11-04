@@ -238,7 +238,7 @@ func open(a: BattleUnit, t: BattleUnit, at := Vector2i(-1, -1), hide_target := f
 		if anim_exists(md):
 			var r := idle_frame(Assets.anim(md))
 			m.play(md, r.x, r.y)
-		_sides[side] = {"unit": u, "misc": m, "dir": md}
+		_sides[side] = {"unit": u, "misc": m, "dir": md, "ranged": int(u.info.get("attack_type", 0)) == 1}   # ranged: 本侧出手是远程 (strike 时按实际出手改写, 见 exp_pose)
 		_build_info(side, u)
 		m.visible = not (hide_target and u == t)
 	var z := UiLayout.el("closeup.zoom")
@@ -277,9 +277,10 @@ func _side_of(u: BattleUnit) -> String:
 
 ## 攻击方 a 对 d 的一次出手; results 为 BattleRules.strike 的结果, 伤害已由调用方算好但尚未扣除
 ## skill_name: 物理绝技的技能名, 近景里和闪光同一刻起在顶部出一块技能名横幅 (敌我一样); 普攻/反击为空
-## vampire: 武器吸血 (附加类型 0) 命中时的吸血量, -1 = 没触发; 触发了 (吸到 0 也算) 在最后一击的伤害数字之后放吸血表现 (见 _vampire)
+## vampire: 武器吸血 (附加类型 0) 命中时的吸血量 / 摄魂鬼触的术力实涨量 (Skills.closeup_drain), -1 = 没触发; 触发了 (吸到 0 也算) 在最后一击的伤害数字之后放吸血表现 (见 _vampire)
 ## digits: 守方弹不弹伤害数字 (物理绝技的结果记录不带伤害数值标志 (Skills.shows_damage) 时近景里也不弹, 如摄魂鬼触, 实测)
-func strike(a: BattleUnit, d: BattleUnit, results: Array, skill_anim := "", skill_name := "", vampire := -1, digits := true, ranged := false) -> void:
+## vampire_hp: 吸取表现的蓝数字是否同时把攻方体力条涨上去 (武器吸血 true; 摄魂鬼触吸的是术力, 近景信息栏只有体力, 条不动)
+func strike(a: BattleUnit, d: BattleUnit, results: Array, skill_anim := "", skill_name := "", vampire := -1, digits := true, ranged := false, vampire_hp := true) -> void:
 	var asd: Dictionary = _sides[_side_of(a)]
 	var dsd: Dictionary = _sides[_side_of(d)]
 	var kind: String = results[0]["kind"]
@@ -287,6 +288,7 @@ func strike(a: BattleUnit, d: BattleUnit, results: Array, skill_anim := "", skil
 	var atk_dir := ThemeAssets.f("unit_attack", [sp, sp, "ab" if kind in ["miss", "guard"] else "a"])
 	if skill_anim != "" and anim_exists(skill_anim):
 		atk_dir = skill_anim
+	asd["ranged"] = ranged
 	asd["misc"].visible = true   # 上一击是对方的远程攻击时本方被藏着 (见 _play_attack 末尾), 轮到本方出手 (如反击) 先现身
 	if ranged:
 		dsd["misc"].visible = false   # 调用方没在 open 时藏 (hide_target) 也兜住: 闪光期间守方不露脸
@@ -298,15 +300,38 @@ func strike(a: BattleUnit, d: BattleUnit, results: Array, skill_anim := "", skil
 		var fx := AnimPlayer.new()
 		_stage.add_child(fx)
 		fx.play(ThemeAssets.f("cast_flash", ["l" if _side_of(a) == "left" else "r"]), 0, -1, false)
-		await fx.finished
-		fx.queue_free()
+		if skill_name != "":
+			# 带技能名横幅时 Sp000 不挡出手: 原版近景状态 3 起 Sp000 并置阻塞标志 [+9], 但横幅滑入一结束 就无条件清掉 [+9],
+			# 于是 Sp000 放到第 3 帧时攻击动画已经开始, 光效叠在出手上继续放完。原版 直读近景对象 (破魔杵): Sp000 第 0 帧 tick 12、
+			# 横幅滑入完 tick 17 清 [+9]、tick 18 进出手状态 5, Sp000 放到 tick 31; 摄魂鬼触同样 6 tick 后出手。会心 / 连击没有横幅, 照旧等 Sp000 放完
+			fx.finished.connect(fx.queue_free)
+			await create_tween().tween_interval(UiSlide.TICK * banner_in_ticks()).finished
+		else:
+			await fx.finished
+			fx.queue_free()
 	var total := 0
 	for r in results:
 		total += int(r["damage"])
 	for i in results.size():
-		await _play_attack(a, d, asd, dsd, atk_dir, results[i], vampire, i == results.size() - 1, digits, ranged, total)
+		await _play_attack(a, d, asd, dsd, atk_dir, results[i], vampire, i == results.size() - 1, digits, ranged, total, vampire_hp)
 		if int(dsd["panel"].shown) <= 0:
 			break  # 已击杀: 不演剩余命中 (连击第一下致死不再打空气, 2026-10-06 用户实测)
+
+
+## 技能名横幅滑入的 tick 数 (演出表 banner.in 的步数, 原版 5 步 + 判到 0 的那一 tick = 6): 横幅滑入结束时原版清近景阻塞标志, 见 strike
+static func banner_in_ticks() -> int:
+	return maxi(1, (CastFx.section("banner").get("in", {}).get("dy", []) as Array).size())
+
+
+## 近景里弹经验框前的站位 (原版近景状态 0x13): 右侧 (玩家) 单位挣到经验时先把它显示出来 ([字段] = 1),
+##   它这次出手是远程 ([字段] == 1) 再把左侧单位藏起来 ([字段] = 0) —— 即镜头回到远程出手的第一段 (攻方一侧, 守方不在)。
+##   原版 直读 (真胤破魔杵): 伤害数字期间攻方藏、守方在, 经验框那一刻起攻方现身、守方消失, 直到近景关闭。没挣经验不动
+func exp_pose(u: BattleUnit) -> void:
+	if not visible or not _sides.has("right") or _sides["right"]["unit"] != u:
+		return
+	_sides["right"]["misc"].visible = true
+	if bool(_sides["right"].get("ranged", false)) and _sides.has("left"):
+		_sides["left"]["misc"].visible = false
 
 
 ## 施放者单人近景 (battle_type 2 绝技, 如电射星驰: 殷剑平放下剑匣、御剑, 随后才转到地图放全屏特效): 闪光 + 施放者的 NNN[-n]s 动画, 没有守方、没有伤害; 原版这里没有技能名横幅 (的横幅标志传 0, 调用方传空名)
@@ -336,7 +361,7 @@ func cast_solo(a: BattleUnit, skill_anim: String, skill_name: String) -> void:
 
 ## vamp: 吸血量 (-1 没触发); 只在最后一击后演, 致死的一击也算最后一击 (打死了后面的不演, 吸血跟在致死那一击后面)
 ## digit_total: 连击两遍放完后伤害数字只弹一次 (原版实测 U4: 数字和渐隐只在两遍都放完后各出一次), 数值是两遍之和; 打死的那一遍也算最后一遍
-func _play_attack(a: BattleUnit, d: BattleUnit, asd: Dictionary, dsd: Dictionary, atk_dir: String, r: Dictionary, vamp := -1, last := true, digits := true, ranged := false, digit_total := -1) -> void:
+func _play_attack(a: BattleUnit, d: BattleUnit, asd: Dictionary, dsd: Dictionary, atk_dir: String, r: Dictionary, vamp := -1, last := true, digits := true, ranged := false, digit_total := -1, vamp_hp := true) -> void:
 	r = r.duplicate()
 	if gc.god and d.camp != 1:
 		r["damage"] = 0
@@ -357,7 +382,7 @@ func _play_attack(a: BattleUnit, d: BattleUnit, asd: Dictionary, dsd: Dictionary
 		panel.set_hp(hp_after)
 		await _jump(dsd, digit_value, show_digits)
 		if drain >= 0:
-			await _vampire(asd, drain)
+			await _vampire(asd, drain, vamp_hp)
 		return
 	var atk := AnimPlayer.new()
 	atk.other = dmisc
@@ -414,21 +439,22 @@ func _play_attack(a: BattleUnit, d: BattleUnit, asd: Dictionary, dsd: Dictionary
 		await _jump(dsd, digit_value, show_digits)
 		await _kill(dmisc)
 		if drain >= 0:
-			await _vampire(asd, drain)   # 先演倒下再吸血 (状态 7 死亡淡出 -> 状态 8/9, 实测: 淡出放完光环才出)
+			await _vampire(asd, drain, vamp_hp)   # 先演倒下再吸血 (状态 7 死亡淡出 -> 状态 8/9, 实测: 淡出放完光环才出)
 	else:
 		var idl := idle_frame(dmisc.data)
 		dmisc.play(dsd["dir"], idl.x, idl.y)
 		# 伤害数字只看结算值: 命中/会心/格挡/闪避都走这里, 闪避就是红字「0」(原版实测); 不出「閃避」之类的文字
 		await _jump(dsd, digit_value, show_digits)
 		if drain >= 0:
-			await _vampire(asd, drain)
+			await _vampire(asd, drain, vamp_hp)
 
 
 ## 武器吸血的表现 (原版近景状态 8 / 9, 实测 2026-10-18, 差异): 命中且触发吸血就放, 吸到 0 (攻方满血) 一样放:
 ##   伤害数字 (或守方倒下淡出) 放完 delay 秒后, 攻击方身上放特效 Misc/Sp001r (攻方在右) / Sp001l (攻方在左) —— 近景构造里 "MISC\\SP%03dR/L.SAF" 按
 ##   武器附加特效号 (吸血 = 1) 载入的红色收拢光环 (8 帧 x 2 tick = 0.64 秒, 首帧淡入); 光环放完 digit_delay 秒后弹蓝色吸血量数字,
 ##   攻方体力条与数字同时按每周期 2% 上限涨上去 (InfoPanel.heal); 数字放完才往下 (敌方反击在这之后)
-func _vampire(asd: Dictionary, amount: int) -> void:
+## heal_hp = false: 只放光环和蓝数字, 体力条不动 (摄魂鬼触吸术)
+func _vampire(asd: Dictionary, amount: int, heal_hp := true) -> void:
 	asd["misc"].visible = true   # 远程攻击后攻方被藏着 (_play_attack), 吸血光环在它身上放要露面
 	var cfg: Dictionary = UiLayout.el("closeup.vampire")
 	var left: bool = asd == _sides.get("left")
@@ -440,7 +466,8 @@ func _vampire(asd: Dictionary, amount: int) -> void:
 	await ring.finished
 	ring.queue_free()
 	await create_tween().tween_interval(float(cfg.get("digit_delay", 0.0))).finished
-	panel.heal(amount)
+	if heal_hp:
+		panel.heal(amount)
 	var n := DamageDigits.new(str(amount), "closeup.damage.left" if left else "closeup.damage.right", true)
 	_ui.add_child(n)
 	await n.done

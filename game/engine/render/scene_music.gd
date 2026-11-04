@@ -8,6 +8,9 @@ extends RefCounted
 const FADE_SECS := 2.08
 const FADE_LOW := 25.0 / 127.0   # 淡出到这个音量才真暂停; 淡入从这个音量起
 
+## 场景音乐播放器都在这个组里: 过场视频 (MovieScene) 播放期间暂停其中在响的, 播完接着放
+const GROUP := "scene_music"
+
 var _host: Node
 var _players := {}
 
@@ -28,6 +31,7 @@ func load_track(ch: int, num: int) -> void:
 	if p == null:
 		p = AudioStreamPlayer.new()
 		p.bus = "Music"
+		p.add_to_group(GROUP)
 		_host.add_child(p)
 		_players[ch] = p
 	p.stop()

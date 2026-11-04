@@ -472,15 +472,29 @@ static func shows_damage(sk: Dictionary, physical: bool) -> bool:
 	return ot in [0, 1] or (ot == 2 and int(sk.get("other_effect", -1)) in [9, 12])
 
 
-## 物理绝技近景里守方弹不弹伤害数字 (实测): 带伤害数值标志 (shows_damage) 且结果码不是 11 (吸术成功) 才弹 ——
-## 回风枪 (码 2) / 化血毒沫中毒成功 (码 9) / 吸术没吸到 (码 2) 都弹, 摄魂鬼触吸术成功 (码 11) 一个数字都没有 (伤害照扣)
+## 物理绝技近景里守方弹不弹伤害数字: 带伤害数值标志 (shows_damage) 就弹 —— 回风枪 (码 2) / 化血毒沫中毒成功 (码 9) / 摄魂鬼触 (吸到码 11、没吸到码 2) 都弹。
+## ⑥b 曾记「摄魂鬼触吸术成功 (码 11) 一个数字都没有」, 2026-11-04 直读后缓冲重测推翻: 吸术成功 (施放者术力 50 -> 152 / 290 -> 300)
+## 两次都在守方身上弹红「388」「384」, 之后才是攻方的吸取光环与蓝数字; 回地图后的结果动画不弹数字仍按
 static func closeup_digits(sk: Dictionary, rec: Dictionary) -> bool:
-	return shows_damage(sk, true) and int(rec.get("code", 0)) != 11
+	return shows_damage(sk, true)
+
+
+## 物理绝技近景里攻方身上的「吸取」表现 (Sp001 收拢光环 + 蓝数字): 返回蓝数字的值, -1 = 没有这段表现。
+## ot1 oe6 (摄魂鬼触) 一进分支就置结果头 [+8] = 1 (在格挡 / 命中掷骰之前, 所以被格挡、没吸到也照放),
+##   近景初始化 按 [+8] == 1 给攻方一侧的近景特效号传 1 (= MISC\SP001R/L.SAF, 同武器吸血), 否则 -1;
+##   蓝数字 = 施放者术力实际涨了多少 (满术力时只剩缺口, 没吸到为 0), 体力条不动。实测: 鲜于超借 233 精灵放摄魂鬼触,
+##   吸 112 弹蓝「112」、术力差 10 到满弹「10」、目标没术力 (掷骰落空) 照放光环弹「0」
+static func closeup_drain(sk: Dictionary, rec: Dictionary) -> int:
+	if int(sk.get("other_type", -1)) != 1 or int(sk.get("other_effect", -1)) != 6:
+		return -1
+	return maxi(0, int(rec.get("mp_gained", 0)))
 
 
 static func _drain_mp(c, t, div: int, rec: Dictionary) -> void:
 	var v: int = mini(t.mp, t.mp_max / div)
 	v = maxi(0, v)
 	t.mp -= v
+	var before: int = c.mp
 	c.mp = mini(c.mp_max, c.mp + v)
 	rec.mp_drained = v
+	rec.mp_gained = c.mp - before   # 施放者实际涨的术力 (近景蓝数字用, 见 closeup_drain)

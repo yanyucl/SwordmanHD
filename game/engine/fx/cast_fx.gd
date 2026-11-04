@@ -12,8 +12,8 @@ const DEFAULT := {
 	"banner": {"element": "map.cast_banner", "hold_ticks": 37,
 		"in": {"dy": [-16, -16, -8, -4, -2, 0], "alpha16": [4, 6, 8, 10, 12, 14]},
 		"out": {"dy": [0, 0, 2, 4, 8, 16], "alpha16": [12, 10, 8, 6, 4, 2]}},
-	"skill": {"default": {"anim": "", "convention": "fx", "anchor": "target", "hide_caster": false},
-		"battle_type": {}},
+	"skill": {"default": {"anim": "", "convention": "fx", "anchor": "target", "hide_caster": false, "cast_pose": true},
+		"physical": {}, "battle_type": {}},
 	"result": {"anim": "", "convention": "unit", "anchor": "unit"},
 	"movie": {"path": "", "skip": ["cancel"]},
 }
@@ -51,11 +51,17 @@ static func for_skill(sk: Dictionary, spr: int) -> Dictionary:
 	# battle_type 只对绝技 (物理) 有意义: 原版施放入口 先看 skill+0 —— 咒术 (0) 一律走 放 Magic/M<animation_id>,
 	# battle_type 完全被忽略; 绝技才按 分近景 / 地图 S / SM。妖氛鬼雾 (88)、幽都玄华 (89)、剑雄/剑雌/灵鼩召唤 (95~97) 是 battle_type=1 的咒术,
 	# 复刻原先也按它改播施法者的 NNNs (差异)
-	if by.has(bt) and int(sk.get("move_attack_type", 0)) != 0:
-		out.merge(by[bt], true)
+	if int(sk.get("move_attack_type", 0)) != 0:
+		# 绝技 (skill+0 = 1) 在演出器里还有共同的分支 (置 [字段]): 不摆施法姿势 、不把镜头移到落点 (状态 3 直跳 6) —— 见演出表 skill.physical
+		out.merge(s.get("physical", {}), true)
+		if by.has(bt):
+			out.merge(by[bt], true)
 	if sk.get("fx") is Dictionary:
 		out.merge(sk["fx"], true)
 	out["anim"] = fill(String(out.get("anim", "")), sk, spr)
+	# 直线射程 (range type 1) 的技能按施放方向只放演出动画的一段 (见 direction_segment); 原版看的是技能, 不看动画文件
+	if not out.has("directional"):
+		out["directional"] = int(sk.get("range", {}).get("type", 0)) == 1
 	# 技能记录 has_movie (Mag_dat 字段): 落点镜头到位后、法术动画之前先放一段全屏视频 (演出表 movie 段给路径与可跳过的键)
 	var mv: Dictionary = section("movie")
 	if bool(sk.get("has_movie", false)) and not out.has("movie"):
@@ -72,23 +78,28 @@ static func fill(tpl: String, sk: Dictionary, spr: int) -> String:
 		.replace("{spr3}", "%03d" % spr).replace("{bspr}", ("-%d" % bspr) if bspr > 0 else "")
 
 
-## 按施放方向分 4 段的演出动画 (原版仅 004-2SM / 005-1sm / 007-1sm: 帧数 = 4 x action_counts[0], 如韩千秀双环映月月牙) 只放对应那一段 [起, 止);
-## 其它动画 (0, -1) = 整段。实测 (2026-10-29, 韩千秀双环映月向上/右/下/左各放一遍, 与 007-1sm 各段按亮部形状比对, 相似度 0.97~1.0): 段号 上 0 / 右 1 / 下 2 / 左 3
-static func direction_segment(anim_data: Dictionary, variant: int) -> Vector2i:
-	if anim_data.is_empty() or variant < 0 or variant > 3:
+## 按施放方向放演出动画的一段 [起, 止) (原版演出器, 静态): 记录的方向 [字段] 不是 -1 时, 起 = 方向 x action_counts[0], 止 = 起 + action_counts[0];
+## 方向只有直线射程的技能才有 (施放记录: skill+4 == 1 才按落点定 0~3, 否则 -1 = 整段), 与动画文件长什么样无关。
+## 原版只有 004-2SM / 005-1sm / 007-1sm 是 4 x action_counts[0] 帧 (刚烈破 / 分天斩 / 双环映月各自施放者的 SM), 实测 (2026-10-29, 韩千秀双环映月四个方向,
+## 与 007-1sm 各段亮部形状比对相似度 0.97~1.0): 段号 上 0 / 右 1 / 下 2 / 左 3。
+## action_counts[0] = 0 的动画 (如别人的 006-1sm 被借去放分天斩) 原版也照分: 起 = 止 = 0, 播放循环先画起始帧、下一帧就到止 -> 只闪第 0 帧 (b 原版「只有极小的光团」),
+## 所以这里返回 [0, 1)。directional = false 或方向不合法: (0, -1) = 整段
+static func direction_segment(anim_data: Dictionary, variant: int, directional := true) -> Vector2i:
+	if not directional or anim_data.is_empty() or variant < 0 or variant > 3:
 		return Vector2i(0, -1)
-	var c0 := int(anim_data.get("action_counts", [0])[0])
-	if c0 > 0 and anim_data["frames"].size() == 4 * c0:
-		return Vector2i(variant * c0, variant * c0 + c0)
-	return Vector2i(0, -1)
+	var c0 := maxi(0, int(anim_data.get("action_counts", [0])[0]))
+	var n: int = anim_data.get("frames", []).size()
+	if n == 0:
+		return Vector2i(0, -1)
+	var s := mini(variant * c0, maxi(0, n - 1))
+	return Vector2i(s, mini(s + maxi(1, c0), n))
 
 
-## 施放方向 (施放者格 c -> 落点格 t) 的段号: 上 0 / 右 1 / 下 2 / 左 3; 同一格 (射程 0) 用 own (施放者当前朝向的段号, 见 variant_of_dir)
-static func direction_variant(c: Vector2i, t: Vector2i, own := 2) -> int:
-	var d := t - c
-	if d == Vector2i.ZERO:
-		return own
-	if absi(d.y) > absi(d.x):
-		return 2 if d.y > 0 else 0
-	return 1 if d.x > 0 else 3
+## 施放方向 (施放者格 c -> 落点格 t) 的段号, 与原版施放记录 同一判法: 落点 x 大 -> 右 1, x 小 -> 左 3, 同列再看 y: y 大 -> 下 2, 否则 (含同格) -> 上 0
+static func direction_variant(c: Vector2i, t: Vector2i) -> int:
+	if t.x > c.x:
+		return 1
+	if t.x < c.x:
+		return 3
+	return 2 if t.y > c.y else 0
 

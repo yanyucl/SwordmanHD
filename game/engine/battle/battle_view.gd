@@ -229,7 +229,8 @@ func spawn_fx(dir: String, pos: Vector2, start := 0, end := -1, z := 50, sound :
 
 ## 原版 (状态机): 镜头移到施法者 -> 压暗 + 法术名横幅 (Misc/Mag_misc 第 0 帧, 滑入, 37 tick 后滑出)
 ## + 施法光效 (Mag_misc 第 1 帧起, 约定 fx 锚在施法者) -> 镜头移到落点 -> 法术动画 (cast_fx)。返回 cast_end() 要收掉的节点。
-func cast_begin(u: BattleUnit, skill_name: String) -> Array:
+## pose = false: 不摆施法姿势 (只有咒术 [字段]=0 才对施放者调, 绝技不摆; 演出表 skill 段 cast_pose)
+func cast_begin(u: BattleUnit, skill_name: String, pose := true) -> Array:
 	await cast_camera(Vector2i(u.cx, u.cy))
 	var dim := ColorRect.new()
 	dim.color = Color(0, 0, 0, float(CastFx.section("dim").get("alpha", 0.6875)))
@@ -239,7 +240,8 @@ func cast_begin(u: BattleUnit, skill_name: String) -> Array:
 	dim.z_index = 5  # 只压暗地图与地图物件; 人物 (units_node z 10) 不压暗 (实测人物亮度不变, 施法者摆施法姿势)
 	dim.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	bs.world.add_child(dim)
-	u.play_act(BattleUnit.Act.CAST, u.dir)
+	if pose:
+		u.play_act(BattleUnit.Act.CAST, u.dir)
 	var banner := cast_banner(skill_name)
 	var au := CastFx.section("aura")
 	var at := Vector2i(u.cx, u.cy)
@@ -272,13 +274,13 @@ func cast_fx(fx: Dictionary, caster: BattleUnit, target: Vector2i) -> void:
 		await Cutscene.play_file(self, movie, fx.get("movie_skip", ["cancel"]))
 	if not has_anim:
 		return
-	# hide_caster_on_self: 落点就是施放者自己的格 (射程 0, 如旋刃卷岚 / 日轮神剑) 时才藏: 这类演出文件 (NNN-nS) 自己把施放者画在画面中央的原位,
-	# 不藏地图上的人会重影; 落点在别处时演出画在落点, 施放者留在原地, 不能藏 (②, 文件内容为证, 未实机核对)
+	# hide_caster: 演出期间藏地图上的施放者 (地图演出绝技 NNN-nS 自己把施放者画在画面中央, 模式 0 绝技演出前置施放者 +8 = 2、演出后置回 1);
+	# hide_caster_on_self: 只在落点就是施放者自己的格时藏 (给锚在落点的演出用)
 	var hide := bool(fx.get("hide_caster", false)) or (bool(fx.get("hide_caster_on_self", false)) and at == Vector2i(caster.cx, caster.cy))
 	if hide:
 		caster.visible = false
-	var own := {BattleUnit.Dir.SOUTH: 2, BattleUnit.Dir.WEST: 3, BattleUnit.Dir.NORTH: 0, BattleUnit.Dir.EAST: 1}.get(caster.dir, 2) as int
-	var seg := CastFx.direction_segment(Assets.anim(dir), CastFx.direction_variant(Vector2i(caster.cx, caster.cy), target, own))   # 按方向分 4 段的动画只放一段
+	# 直线射程技能按施放方向只放一段 (方向 = 施放者 -> 落点); 其它整段
+	var seg := CastFx.direction_segment(Assets.anim(dir), CastFx.direction_variant(Vector2i(caster.cx, caster.cy), target), bool(fx.get("directional", false)))
 	await map_anim(dir, at, seg.x, seg.y, String(fx.get("convention", "fx")), String(fx.get("convention", "fx")) == "fx")
 	if hide:
 		caster.visible = true

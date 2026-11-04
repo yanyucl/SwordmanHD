@@ -15,6 +15,7 @@ var _queue: Array = []
 var _on_done: Callable
 var _skip: Array = ["confirm", "cancel"]
 var _player: VideoStreamPlayer
+var _music_paused: Array = []   # 开播时暂停的场景音乐播放器 (_pause_scene_music)
 var _layer: CanvasLayer   # 最高层画布: 铺满全屏的黑底 + 视频, 盖住下面的场景与界面层 (宽屏全屏时两侧不再露出下面的贴图)
 
 ## 视频层的画布层号: 高于战场/营地的界面层 (30/31/40) 与设定面板 (54/55)
@@ -53,12 +54,14 @@ func _ready() -> void:
 		_next())
 	_layer.add_child(_player)
 	InputRouter.push(self)
+	_pause_scene_music()
 	_next()
 
 
 func _next() -> void:
 	if _queue.is_empty():
 		InputRouter.pop(self)
+		_resume_scene_music()
 		done.emit()
 		_on_done.call()
 		return
@@ -81,6 +84,26 @@ func _next() -> void:
 
 func _exit_tree() -> void:
 	InputRouter.pop(self)  # 中途被释放 (换场景/退出) 也要出栈, 不等 _prune 兜底
+	_resume_scene_music()
+
+
+## 视频自带声音 (法术视频 / 诸物炼化也有配乐), 播放期间暂停在响的场景音乐, 免得两路叠在一起; 播完从原处接着放。
+## 剧情视频 (0x29) 另由 BattleScene.play_movie 先停掉音乐、由剧情 VM 决定何时接回, 到这里已没有在响的
+func _pause_scene_music() -> void:
+	for n in get_tree().get_nodes_in_group(SceneMusic.GROUP):
+		var p := n as AudioStreamPlayer
+		var tw: Variant = p.get_meta("fade_tween") if p != null and p.has_meta("fade_tween") else null
+		var fading_out: bool = tw is Tween and (tw as Tween).is_running() and bool(p.get_meta("fade_pause", false))   # 剧本正淡出暂停的不管, 播完别把它接回来
+		if p != null and p.playing and not p.stream_paused and not fading_out:
+			p.stream_paused = true
+			_music_paused.append(p)
+
+
+func _resume_scene_music() -> void:
+	for p in _music_paused:
+		if is_instance_valid(p) and p.stream_paused:
+			p.stream_paused = false
+	_music_paused = []
 
 
 ## 这个动作是否跳过当前段

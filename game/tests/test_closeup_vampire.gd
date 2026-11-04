@@ -3,7 +3,7 @@ extends "res://tests/test_base.gd"
 ## 近景武器吸血的表现与物理绝技的数字 (实测 2026-10-18):
 ##   吸血光环 = 近景构造按特效号载入的 Misc/Sp001r (攻方在右) / Sp001l (攻方在左), 8 帧 x 2 tick; 不是升级光环 Ftlup_r;
 ##   吸到的体力 (数字与黄条) 每周期涨 2% 上限 (上限 71, 每周期约 1.4, 20 -> 71 约 36 周期);
-##   物理绝技的结果记录不带伤害数值标志 (摄魂鬼触) 时近景也不弹数字, 带的 (回风枪) 弹。
+##   物理绝技的结果记录带伤害数值标志就弹数字 (回风枪 / 摄魂鬼触, 后者 重测); 摄魂鬼触另有攻方吸取光环 + 蓝数字。
 
 const REQUIRES_TEST := {  # 个别方法的依赖 (run_tests.gd 头注), 缺则 SKIP
 	"test_heal_rises_two_percent_of_max_per_tick": ["original"],
@@ -89,5 +89,60 @@ func test_physical_skill_digits_follow_damage_flag():
 		return
 	check(Skills.closeup_digits(s49, {"code": 2}), "回风枪近景弹红数字 (实测 70)")
 	check(Skills.closeup_digits(s66, {"code": 2}), "摄魂鬼触没吸到术力 (码 2) 照弹 (原版: 敌方没有术力时弹 35)")
-	check(not Skills.closeup_digits(s66, {"code": 11}), "摄魂鬼触吸术成功 (码 11) 近景一个数字都没有 (实测)")
+	check(Skills.closeup_digits(s66, {"code": 11}), "摄魂鬼触吸术成功 (码 11) 也弹 (2026-11-04 直读后缓冲重测: 388 / 384, 推翻 ⑥b,)")
 	check(Skills.closeup_digits(_skill(69), {"code": 9}), "化血毒沫中毒成功 (码 9) 照弹 (原版: 116)")
+
+
+## 摄魂鬼触 (ot1 oe6) 的近景吸取表现: 一进分支就置结果头 [+8] = 1 (格挡 / 没吸到也放), 蓝数字 = 施放者术力实涨量; 其它绝技没有
+func test_closeup_drain_only_for_mp_drain_skill():
+	var s66 := _skill(66)
+	var s49 := _skill(49)
+	if s66.is_empty() or s49.is_empty():
+		skip("缺 data/skills.json")
+		return
+	eq(Skills.closeup_drain(s66, {"mp_gained": 112}), 112, "吸 112 术力: 蓝数字 112 (实测)")
+	eq(Skills.closeup_drain(s66, {"code": 2}), 0, "没吸到 / 被格挡: 照放光环, 蓝数字 0 (实测: 目标没术力弹「0」)")
+	eq(Skills.closeup_drain(s49, {"code": 2}), -1, "回风枪: 没有吸取表现")
+	eq(Skills.closeup_drain(_skill(69), {"code": 9}), -1, "化血毒沫: 没有吸取表现")
+
+
+## 蓝数字是施放者术力实际涨的量: 差 10 到满时只涨 10 (实测: 290/300 吸 112 弹「10」)
+func test_drain_mp_records_actual_gain():
+	var c := {"mp": 290, "mp_max": 300}
+	var t := {"mp": 336, "mp_max": 336}
+	var rec := {}
+	Skills._drain_mp(c, t, 3, rec)
+	eq(int(rec["mp_drained"]), 112, "目标掉 min(术力, 上限/3) = 112")
+	eq(int(rec["mp_gained"]), 10, "施放者只涨到上限, 实涨 10")
+	eq(int(c["mp"]), 300)
+	eq(int(t["mp"]), 224)
+
+
+## 经验框前的站位 (原版近景状态 0x13): 右侧挣经验的单位现身; 它这次是远程出手 ([字段]) 则藏左侧 (破魔杵 原版 直读)
+func test_exp_pose_shows_right_and_hides_left_after_ranged():
+	var cu := BattleCloseup.new(null)
+	var u := BattleUnit.new()
+	var e := BattleUnit.new()
+	var rm := Node2D.new()
+	var lm := Node2D.new()
+	rm.visible = false   # 远程出手放完后攻方藏着
+	cu._sides = {"right": {"unit": u, "misc": rm, "ranged": true}, "left": {"unit": e, "misc": lm, "ranged": false}}
+	cu.exp_pose(u)
+	check(not rm.visible and lm.visible, "近景没开着: 什么都不动")
+	cu.visible = true
+	cu.exp_pose(e)
+	check(not rm.visible and lm.visible, "左侧单位 (敌方) 不弹经验框: 不动")
+	cu.exp_pose(u)
+	check(rm.visible, "右侧挣经验: 现身")
+	check(not lm.visible, "右侧是远程出手: 藏左侧 (镜头回到攻方一侧)")
+	lm.visible = true
+	cu._sides["right"]["ranged"] = false
+	cu.exp_pose(u)
+	check(lm.visible, "近战出手: 左侧照旧")
+	for n in [rm, lm, u, e, cu]:
+		n.free()
+
+
+## 带横幅的技能近景: Sp000 不挡出手, 横幅滑入完 (6 tick) 就开始攻击动画 (原版横幅清阻塞标志, 原版 直读)
+func test_banner_releases_attack_after_slide_in():
+	eq(BattleCloseup.banner_in_ticks(), 6, "横幅滑入 5 步 + 判到 0 的一 tick: Sp000 第 0 帧 tick 12 -> 出手 tick 18")

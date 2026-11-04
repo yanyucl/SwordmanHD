@@ -930,8 +930,9 @@ func show_title_card() -> void:
 	layer.queue_free()
 
 
-func play_movie(num: int) -> void:
-	var held := music.stop_all()   # 视频自带声音, 放的时候静掉音乐, 放完接着放 (SceneMusic.resume_held)
+## 返回停掉时还在响的音乐通道, 由剧情 VM 决定何时接回 (resume_music; EventVM._before_op)
+func play_movie(num: int) -> Array:
+	var held := music.stop_all()   # 视频自带声音, 放的时候静掉音乐
 	var name := ThemeAssets.f("movie", [num])
 	var layer := CanvasLayer.new()
 	layer.layer = 90
@@ -940,6 +941,11 @@ func play_movie(num: int) -> void:
 	layer.add_child(m)
 	await m.done
 	layer.queue_free()
+	return held
+
+
+## 过场视频停掉的音乐从停下处接着放 (SceneMusic.resume_held)
+func resume_music(held: Array) -> void:
 	music.resume_held(held)
 
 

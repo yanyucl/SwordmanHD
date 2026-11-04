@@ -12,6 +12,7 @@ const ROSTER_OUT := GameState.ROSTER_OUT  # 0x4F 离队标志在 game_data 中�
 
 var running := false
 var _queue: Array = []
+var _movie_music_held: Array = []   # 过场视频停掉、还没接回的音乐通道 (_before_op)
 var _show_count := 0      # 0x0B 之后的 0x01: 显示单位
 var _clear_count := 0     # 0x09/0x0A 之后的 0x01: 隐藏单位
 var _clear_remove := 0
@@ -62,7 +63,10 @@ func run(id: int) -> void:
 	# 关掉 = 原版: 停在原处, 战斗继续空转)
 	if Flow.script_end_exit(bs.ctl.rules.ctx, _ending_movie, ended) == "title":
 		ended = true
+		_movie_music_held = []
 		await gc.flow.ending()
+	elif not ended:
+		_resume_movie_music()   # 视频是事件最后一条: 回到战斗时接回
 
 
 func _register_ops() -> void:
@@ -187,6 +191,23 @@ func _unit_show_hide(_t: int, d: PackedByteArray) -> void:
 				u.fade_out()
 			_clear_count -= 1
 	_log("单位显隐 %d" % _s(d, 0))
+
+
+## 过场视频停掉的音乐 不在视频放完时立刻接回, 推迟到视频后的下一条指令前: 下一条还是视频就继续静着
+## (第 31 / 34 幕连播), 是关卡结束就作废 (第 0 幕 Movie_17 后直接进城, 立刻接会在淡出进城的一秒里冒出一截全音量战斗曲)
+func _before_op(t: int) -> void:
+	if _movie_music_held.is_empty() or t == 0x29:
+		return
+	if t == 0x02:
+		_movie_music_held = []
+	else:
+		_resume_movie_music()
+
+
+func _resume_movie_music() -> void:
+	if not _movie_music_held.is_empty():
+		bs.resume_music(_movie_music_held)
+		_movie_music_held = []
 
 
 ## 关卡结束, 切换场景
@@ -514,7 +535,7 @@ func _effect_play(_t: int, d: PackedByteArray) -> void:
 
 func _movie(_t: int, d: PackedByteArray) -> void:
 	_log("播放过场 Movie_%02d" % _s(d, 0))
-	await bs.play_movie(_s(d, 0))
+	_movie_music_held.append_array(await bs.play_movie(_s(d, 0)))
 	if Content.is_ending_movie(_s(d, 0)):  # 结局过场 (内容包 manifest.ending_movies; 原版 Movie_13) 见 run()
 		_ending_movie = true
 

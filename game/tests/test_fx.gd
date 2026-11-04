@@ -60,16 +60,28 @@ func test_solo_closeup_only_for_battle_type_2_skills():
 	eq(ids, [43, 45, 48, 50, 53, 58, 59, 60, 78, 82], "技能表里共 10 个: 电射星驰 火灵/天华神剑 刚烈破 分天斩 鬼神灭破 金刚法轮 双环映月 鬼缚之阵 万邪天灭")
 
 
-## 地图演出绝技 (battle_type 1): 演出文件自带施放者, 落点是自己时才藏地图上的人 (battle_view.cast_fx); 演出表里要有这个开关
-func test_map_skill_hides_caster_only_on_self():
+## 绝技的地图演出 (原版演出器 [字段] 分支): 镜头不移到落点、动画锚在施放者、不摆施法姿势; battle_type 1 (NNN-nS 自带施放者) 演出期间一律藏施放者
+func test_physical_skill_map_fx_stays_on_caster():
 	var fx := CastFx.for_skill({"move_attack_type": 1, "animation_id": 0, "battle_type": 1, "battle_sprite": 3}, 7)
 	eq(fx["anim"], "Sprite/man007/007-3s")
-	eq(bool(fx.get("hide_caster_on_self", false)), true, "type 1: 落点是自己时藏施放者")
-	eq(bool(fx.get("hide_caster", false)), false, "不是一律藏")
-	eq(bool(CastFx.for_skill({"move_attack_type": 1, "battle_type": 2, "battle_sprite": 2}, 1).get("hide_caster_on_self", false)), false, "type 2 (SM) 施放者全程可见 (实测火灵神剑)")
+	eq(String(fx["anchor"]), "caster", "绝技: 镜头留在施放者, 不移到落点")
+	eq(bool(fx.get("cast_pose", true)), false, "绝技不摆施法姿势")
+	eq(bool(fx.get("hide_caster", false)), true, "type 1: 演出期间藏施放者 (模式 0, +8 = 2)")
+	var sm := CastFx.for_skill({"move_attack_type": 1, "battle_type": 2, "battle_sprite": 1, "range": {"type": 1}}, 5)
+	eq(sm["anim"], "Sprite/man005/005-1sm")
+	eq(String(sm["anchor"]), "caster", "type 2 SM 也画在施放者处的镜头上")
+	eq(bool(sm.get("hide_caster", false)), false, "type 2 (SM) 施放者全程可见 (实测火灵神剑)")
+	eq(bool(sm.get("directional", false)), true, "直线射程: 按方向分段")
+	var spell := CastFx.for_skill({"move_attack_type": 0, "animation_id": 3, "battle_type": 1, "range": {"type": 0}}, 1)
+	eq(String(spell["anchor"]), "target", "咒术: 镜头移到落点")
+	eq(bool(spell.get("cast_pose", false)), true, "咒术摆施法姿势")
+	eq(bool(spell.get("directional", true)), false, "菱形射程不分段")
+	var none := CastFx.for_skill({"move_attack_type": 1, "animation_id": 62, "battle_type": -1}, 1)
+	eq(bool(none.get("theater", true)), false, "battle_type -1 绝技 (天魔护铠): 不起演出器 ")
+	eq(bool(CastFx.for_skill({"move_attack_type": 0, "animation_id": 62, "battle_type": -1}, 1).get("theater", true)), true, "咒术不看 battle_type")
 
 
-## 按方向分 4 段的演出动画 (007-1sm 等): 只放对应方向那一段; 方向取施放者 -> 落点, 同格用自身朝向
+## 按方向分段: 直线射程技能起 = 方向 x action_counts[0], 长 action_counts[0]; 看技能不看文件
 func test_direction_segments():
 	var data := {"action_counts": [28], "frames": []}
 	data["frames"].resize(112)
@@ -77,12 +89,14 @@ func test_direction_segments():
 	eq(CastFx.direction_segment(data, 1), Vector2i(28, 56), "右 = 第 1 段")
 	eq(CastFx.direction_segment(data, 2), Vector2i(56, 84), "下 = 第 2 段")
 	eq(CastFx.direction_segment(data, 3), Vector2i(84, 112), "左 = 第 3 段")
-	var plain := {"action_counts": [38], "frames": []}
-	plain["frames"].resize(68)
-	eq(CastFx.direction_segment(plain, 1), Vector2i(0, -1), "近景攻击动画 (action_counts[0] = 命中帧号) 不分段")
-	eq(CastFx.direction_segment({"action_counts": [0], "frames": [1, 2]}, 1), Vector2i(0, -1), "没有分段")
+	eq(CastFx.direction_segment(data, 1, false), Vector2i(0, -1), "非直线射程技能: 整段 (即使文件是 4 段)")
+	var plain := {"action_counts": [0], "frames": []}
+	plain["frames"].resize(29)
+	eq(CastFx.direction_segment(plain, 2), Vector2i(0, 1), "action_counts[0] = 0 (如 006-1sm 借去放分天斩): 原版只闪第 0 帧")
+	eq(CastFx.direction_segment(plain, 2, false), Vector2i(0, -1), "非直线: 整段")
 	eq(CastFx.direction_variant(Vector2i(9, 12), Vector2i(9, 18)), 2, "目标在下")
 	eq(CastFx.direction_variant(Vector2i(9, 12), Vector2i(9, 5)), 0, "目标在上")
 	eq(CastFx.direction_variant(Vector2i(9, 12), Vector2i(15, 12)), 1, "目标在右")
 	eq(CastFx.direction_variant(Vector2i(9, 12), Vector2i(3, 12)), 3, "目标在左")
-	eq(CastFx.direction_variant(Vector2i(9, 12), Vector2i(9, 12), 1), 1, "同格: 用自身朝向")
+	eq(CastFx.direction_variant(Vector2i(9, 12), Vector2i(10, 2)), 1, "x 优先 ")
+	eq(CastFx.direction_variant(Vector2i(9, 12), Vector2i(9, 12)), 0, "同格: 上")

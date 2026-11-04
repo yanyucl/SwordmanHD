@@ -159,6 +159,8 @@ func show_exp() -> void:
 		if gi < texts.size() and not texts[gi].is_empty():
 			t = String(texts[gi][0]).replace("{0}", str(int(ev.exp)))
 		print("经验: %s +%d%s 帧%d" % [u.name_text, int(ev.exp), " 升级" if up else "", RegressLog.log_frame])
+		if closeup != null:
+			closeup.exp_pose(u)   # 近景里: 挣经验的右侧单位现身, 它是远程出手则藏起对方 (原版状态 0x13); 不在近景时什么都不做
 		await bs.msgbox.show_text(face_of(u), 0, 0, t)
 		if up:
 			var lay := UiLayer.new(48)  # 在近景 (35) 与对话框 (50) 之间
@@ -214,7 +216,8 @@ func cast(u: BattleUnit, sk: Dictionary, c: Vector2i, item_id := -1) -> void:
 		var r: Dictionary = res.targets[0] if not res.targets.is_empty() else {"hit": false, "invalid": true, "damage": 0, "guard": false}
 		var kind := "miss" if r.invalid or not r.hit else ("guard" if r.guard else "hit")
 		var atk := ThemeAssets.f("unit_attack_alt", [spr, spr, ("-%d" % bspr) if bspr > 0 else ""])
-		await closeup.strike(u, t, [{"kind": kind, "damage": maxi(0, int(r.damage))}], atk, String(sk["name"]), -1, Skills.closeup_digits(sk, r), int(sk.get("battle_ranged", 0)) == 1)
+		# 摄魂鬼触 (ot1 oe6): 攻方身上放吸取光环 + 蓝数字 (术力实涨量), 不动体力条 (Skills.closeup_drain)
+		await closeup.strike(u, t, [{"kind": kind, "damage": maxi(0, int(r.damage))}], atk, String(sk["name"]), Skills.closeup_drain(sk, r), Skills.closeup_digits(sk, r), int(sk.get("battle_ranged", 0)) == 1, false)
 		if int(res.exp) > 0:
 			gain_exp(u, int(res.exp))
 			await _level_fx(u)
@@ -223,8 +226,13 @@ func cast(u: BattleUnit, sk: Dictionary, c: Vector2i, item_id := -1) -> void:
 		await _cast_results(u, sk, res, false)   # 近景关闭后目标身上仍按结果码放地图结果动画, 不弹数字 (静态)
 	else:
 		res = _resolve_cast(u, sk, c, item_id)
-		var intro: Array = await view.cast_begin(u, String(sk["name"]))  # 镜头到施法者 + 压暗 + 法术名横幅 + 施法光效
-		if Skills.has_solo_closeup(sk):   # 近景 + 地图 SM (③): 地图前奏之后进施放者单人近景 (放下剑匣等), 回地图闪一下技能名横幅再放全屏特效
+		var fx := CastFx.for_skill(sk, spr)
+		# theater = false: 原版不起演出器 (施放分派: 绝技 battle_type 不是 0/1/2 —— 天魔护铠 —— 直接注册结束对象, 没有压暗 / 横幅 / 光圈 / 动画 ⑤)
+		var theater := bool(fx.get("theater", true))
+		var intro: Array = []
+		if theater:
+			intro = await view.cast_begin(u, String(sk["name"]), bool(fx.get("cast_pose", true)))  # 镜头到施法者 + 压暗 + 法术名横幅 + 施法光效
+		if theater and Skills.has_solo_closeup(sk):   # 近景 + 地图 SM (③): 地图前奏之后进施放者单人近景 (放下剑匣等), 回地图闪一下技能名横幅再放全屏特效
 			# 原版 连拍 (2026-10-29, 殷剑平电射星驰): 2.5~4.1 s 地图前奏 (压暗 + 横幅 + 光圈) -> 4.4~8.9 s 近景 (无横幅无守方) -> 9.0~9.3 s 地图上横幅滑入即滑出 -> 9.4 s 起 SM
 			await closeup.open(u, null, c)
 			await closeup.cast_solo(u, ThemeAssets.f("unit_attack_alt", [spr, spr, ("-%d" % bspr) if bspr > 0 else ""]), "")   # 近景无技能名横幅: 调近景初始化 传 0 (横幅标志 [字段]), 类型 0 传 1
@@ -232,14 +240,15 @@ func cast(u: BattleUnit, sk: Dictionary, c: Vector2i, item_id := -1) -> void:
 			view.cast_banner(String(sk["name"]), null, 0)
 			await SceneGuard.wait(self, 0.4)
 		# 法术动画 / 地图演出绝技 (battle_type 1: NNN[-n]S, 2: NNN[-n]SM): 动画、约定、锚点见演出表 fx/cast.json
-		await view.cast_fx(CastFx.for_skill(sk, spr), u, c)
+		if theater:
+			await view.cast_fx(fx, u, c)
 		view.cast_end(intro)
 		if res.summon:
 			view.cast_fade_out(intro, 0.0)
 			await summon(u, sk, c)
 			return
 		await _cast_results(u, sk, res, true)
-		await view.cast_fade_out(intro)   # 压暗保持到结果动画之后, 再渐亮 (④)
+		await view.cast_fade_out(intro, 0.6 if theater else 0.0)   # 压暗保持到结果动画之后, 再渐亮 (④)
 		if int(res.exp) > 0:
 			gain_exp(u, int(res.exp))
 			await _map_level_fx(u)

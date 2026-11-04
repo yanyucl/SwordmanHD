@@ -87,10 +87,16 @@ func _runaway() -> bool:
 func _do(t: int, d: PackedByteArray) -> void:
 	var h: Callable = _ops.get(t, Callable())
 	if h.is_valid():
+		_before_op(t)
 		await h.call(t, d)
 		await _after_op(t)
 	else:
 		push_warning("未实现的%s指令 0x%02X (事件 %d 第 %d 条)" % [kind, t, _id, _step])
+
+
+## 每条指令执行前 (子类覆盖; 战场见 EventVM: 接回过场视频停掉的音乐)
+func _before_op(_t: int) -> void:
+	pass
 
 
 ## 指令执行完后的原版解释器开销 (子类覆盖; 战场见 EventVM: 让出帧的指令完成后还要 2 帧才执行下一条)

@@ -35,6 +35,8 @@ class FakeScene extends RefCounted:
 		calls.append(["start", ch, fade])
 	func close_music(ch: int) -> void:
 		calls.append(["close", ch])
+	func resume_music(held: Array) -> void:
+		calls.append(["resume", held])
 	func unit(i: int):
 		return units[i] if i >= 0 and i < units.size() else null
 	func orig_cam() -> Vector2:
@@ -184,3 +186,23 @@ func test_clear_status_keeps_status_bits_and_summon_flag():
 	vm.free()
 	a.free()
 	s.free()
+
+
+## 过场视频停掉的音乐 推迟到视频后的下一条指令前接回: 下一条还是视频 (第 31 / 34 幕连播) 不接,
+## 下一条是关卡结束 0x02 (第 0 幕 Movie_17 后进城) 作废, 不然淡出进城时会冒出一截全音量战斗曲; 其它指令 (第 30 幕 0x1E) 接回
+func test_movie_music_resumes_at_next_op_unless_stage_ends():
+	var sc := FakeScene.new()
+	var vm := EventVM.new(sc)
+	vm._before_op(0x1E)
+	eq(sc.calls, [], "没放过视频: 什么也不接")
+	vm._movie_music_held = [1]   # 刚放完视频, 通道 1 被停
+	vm._before_op(0x29)
+	eq(sc.calls, [], "连播下一段视频: 继续静着")
+	vm._before_op(0x02)
+	vm._before_op(0x00)
+	eq(sc.calls, [], "关卡结束: 作废, 之后也不接")
+	vm._movie_music_held = [1]
+	vm._before_op(0x1E)
+	vm._before_op(0x05)
+	eq(sc.calls, [["resume", [1]]], "回到战斗演出: 接回一次")
+	vm.free()

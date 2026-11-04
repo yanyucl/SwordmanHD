@@ -32,14 +32,24 @@
    "anim": "Magic/magic{anim3}/M{anim}",
    "convention": "fx",
    "anchor": "target",
-   "hide_caster": false
+   "hide_caster": false,
+   "cast_pose": true
+  },
+  "physical": {
+   "anchor": "caster",
+   "cast_pose": false,
+   "source": "绝技 (skill+0 = 1) 在演出器里置 [字段]: 状态 2 不对施放者调 (施法姿势, 咒术才摆); 状态 3 不把镜头移到落点 (咒术才 移), 直接进状态 6 放动画 —— 镜头停在状态 0 移到的施放者处, 满屏的 NNN-nS / NNN-nSM 画在这个镜头的屏幕原点 (静态)"
   },
   "battle_type": {
+   "-1": {
+    "anim": "",
+    "theater": false,
+    "source": "施放分派: 绝技 skill+0x42 不是 0 / 1 / 2 (天魔护铠 = -1) 时不调 /, 直接注册结束对象 —— 不起演出器: 没有镜头、压暗、横幅、光圈、Magic 动画 (⑤)"
+   },
    "1": {
     "anim": "Sprite/man{spr3}/{spr3}{bspr}s",
-    "hide_caster": false,
-    "hide_caster_on_self": true,
-    "source": ": 地图上演出的绝技播施法者的 NNN[-n]S.SAF (近景同款全屏帧), 由 在落点处按法术约定画"
+    "hide_caster": true,
+    "source": ": 地图上演出的绝技播施法者的 NNN[-n]S.SAF (近景同款全屏帧, 文件自己把施放者画在画面中央); 以模式 0 起演出器,: 模式 0 的绝技放动画前把施放者 +8 置 2 (藏)、放完置回 1"
    },
    "2": {
     "anim": "Sprite/man{spr3}/{spr3}{bspr}sm",
